@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     fmt::Debug,
-    io::{Read, Seek, Write},
+    io::{Read, Seek},
     path::{Path, PathBuf},
 };
 
@@ -63,7 +63,7 @@ fn pack_u8s_to_u16s_le_padded(bytes: &[u8]) -> Vec<u16> {
 
 impl<'c, 'p, F> MsgReader<'c, 'p, F>
 where
-    F: Read + Write + Seek,
+    F: Read + Seek,
 {
     pub fn new(inner: &'c mut CompoundFile<F>, path: &'p Path) -> Self {
         Self { inner, path }
