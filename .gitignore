@@ -1,0 +1,11 @@
+*.bin
+*.db
+!Thumbs.db
+.DS_Store
+.idea/
+.vscode/
+
+target/
+Cargo.lock
+
+sample

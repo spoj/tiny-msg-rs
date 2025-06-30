@@ -1,0 +1,20 @@
+[package]
+name = "tiny_msg"
+description = "A tiny Outlook Email Message (.msg) reader"
+version = "0.1.0"
+authors = ["Matthew Wong <yuyeung.wong@gmail.com>"]
+readme = "README.md"
+license = "MIT"
+categories = ["email", "parser-implementations"]
+keywords = ["msg", "oxmsg", "outlook", "reader"]
+edition = "2024"
+
+[dependencies]
+cfb = "0.10.0"
+chrono = "0.4.41"
+compressed-rtf = "1.0.0"
+thiserror = "2"
+
+[lib]
+name = "tiny_msg"
+path = "src/lib.rs"
