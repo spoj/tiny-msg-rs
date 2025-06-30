@@ -15,6 +15,9 @@ chrono = "0.4.41"
 compressed-rtf = "1.0.0"
 thiserror = "2"
 
+[dev-dependencies]
+clap = { version = "4", features = ["derive"] } # for example CLI
+
 [lib]
 name = "tiny_msg"
 path = "src/lib.rs"

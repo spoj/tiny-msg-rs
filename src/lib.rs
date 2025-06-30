@@ -31,8 +31,8 @@ pub struct MsgReader<'c, 'p, F> {
 }
 
 pub struct Attachment {
-    name: String,
-    data: Vec<u8>,
+    pub name: String,
+    pub data: Vec<u8>,
 }
 
 impl Debug for Attachment {
@@ -227,7 +227,8 @@ where
             .collect();
         let res = attachment_paths
             .into_iter()
-            .filter(|a| self.inner.is_storage(a.join("__substg1.0_3701000D")))
+            .map(|a| a.join("__substg1.0_3701000D"))
+            .filter(|a| self.inner.is_storage(a))
             .collect();
         Ok(res)
     }
