@@ -31,8 +31,8 @@ pub struct MsgReader<'c, 'p, F> {
 }
 
 pub struct Attachment {
-    name: String,
-    data: Vec<u8>,
+    pub name: String,
+    pub data: Vec<u8>,
 }
 
 impl Debug for Attachment {
