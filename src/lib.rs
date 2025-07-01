@@ -1,13 +1,14 @@
 use std::{
     collections::HashMap,
     fmt::Debug,
-    io::{Read, Seek},
+    fs::File,
+    io::{Cursor, Read, Seek},
     path::{Path, PathBuf},
 };
 
 use cfb::CompoundFile;
 
-use chrono::{DateTime, FixedOffset};
+use chrono::{DateTime, FixedOffset, Utc};
 use compressed_rtf::decompress_rtf;
 use thiserror::Error;
 
@@ -44,21 +45,36 @@ impl Debug for Attachment {
     }
 }
 
-fn pack_u8s_to_u16s_le_padded(bytes: &[u8]) -> Vec<u16> {
-    let mut result = Vec::with_capacity(bytes.len().div_ceil(2));
-    let mut i = 0;
-    while i < bytes.len() {
-        let lsb = bytes[i];
-        let msb = if i + 1 < bytes.len() {
-            bytes[i + 1]
-        } else {
-            // Pad with zero if there's an odd number of bytes
-            0x00
-        };
-        result.push(u16::from_le_bytes([lsb, msb]));
-        i += 2; // Move to the next pair
+pub struct Email {
+    from: (String, String),
+    to: Vec<(String, String)>,
+    cc: Vec<(String, String)>,
+    bcc: Vec<(String, String)>,
+    subject: String,
+    body: Option<String>,
+    attachments: Vec<Attachment>,
+    embedded_messages: Vec<Email>,
+}
+
+fn rec_build(file: &Path, subpath: &Path) -> Email {
+    let mut comp = cfb::open(file).unwrap();
+    let mut reader = MsgReader::new(&mut comp, subpath);
+    let subject = reader.subject().unwrap();
+    let emb_paths = reader.embedded_messages().unwrap();
+    let embedded_messages: Vec<_> = emb_paths
+        .into_iter()
+        .map(|emb_path| rec_build(file, &emb_path))
+        .collect();
+    Email {
+        from: ("".to_string(), "".to_string()),
+        to: vec![],
+        cc: vec![],
+        bcc: vec![],
+        subject,
+        body: None,
+        attachments: vec![],
+        embedded_messages,
     }
-    result
 }
 
 impl<'c, 'p, F> MsgReader<'c, 'p, F>
@@ -232,4 +248,21 @@ where
             .collect();
         Ok(res)
     }
+}
+
+fn pack_u8s_to_u16s_le_padded(bytes: &[u8]) -> Vec<u16> {
+    let mut result = Vec::with_capacity(bytes.len().div_ceil(2));
+    let mut i = 0;
+    while i < bytes.len() {
+        let lsb = bytes[i];
+        let msb = if i + 1 < bytes.len() {
+            bytes[i + 1]
+        } else {
+            // Pad with zero if there's an odd number of bytes
+            0x00
+        };
+        result.push(u16::from_le_bytes([lsb, msb]));
+        i += 2; // Move to the next pair
+    }
+    result
 }
