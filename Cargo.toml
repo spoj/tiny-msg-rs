@@ -1,7 +1,7 @@
 [package]
 name = "tiny_msg"
 description = "A tiny Outlook Email Message (.msg) reader"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Matthew Wong <yuyeung.wong@gmail.com>"]
 readme = "README.md"
 license = "MIT"
