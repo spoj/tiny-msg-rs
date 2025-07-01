@@ -62,7 +62,7 @@ fn extract_attachments_recursively(
     for embedded_path in msg.embedded_messages()? {
         let mut msg_reader = MsgReader::new(cfb, &embedded_path);
         let subject = msg_reader
-            .subject()
+            .pr_subject()
             .unwrap_or_else(|_| "Untitled".to_string());
         let new_out_dir = out_dir.join(subject);
         if !new_out_dir.is_dir() {

@@ -1,14 +1,12 @@
-use std::path::Path;
-use tiny_msg::MsgReader;
+use tiny_msg::Email;
 
 fn main() {
-    let mut cfb = cfb::open("path/to/your.msg").unwrap();
-    let mut reader = MsgReader::new(&mut cfb, Path::new("/"));
+    let email = Email::from_path("sample/sample1.msg");
 
-    dbg!(&reader.from());
-    dbg!(&reader.to());
-    dbg!(&reader.cc());
-    dbg!(&reader.sent_date());
-    dbg!(&reader.subject());
-    dbg!(&reader.body());
+    dbg!(&email.from);
+    dbg!(&email.to);
+    dbg!(&email.cc);
+    dbg!(&email.sent_date);
+    dbg!(&email.subject);
+    dbg!(&email.body);
 }

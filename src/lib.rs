@@ -1,14 +1,12 @@
 use std::{
-    collections::HashMap,
     fmt::Debug,
-    fs::File,
     io::{Cursor, Read, Seek},
     path::{Path, PathBuf},
 };
 
 use cfb::CompoundFile;
 
-use chrono::{DateTime, FixedOffset, Utc};
+use chrono::{DateTime, Utc};
 use compressed_rtf::decompress_rtf;
 use thiserror::Error;
 
@@ -26,11 +24,13 @@ pub enum MsgError {
 
 type Result<S> = std::result::Result<S, MsgError>;
 
+/// A low-level API for reading data from a .msg file.
 pub struct MsgReader<'c, 'p, F> {
     inner: &'c mut CompoundFile<F>,
     path: &'p Path,
 }
 
+#[derive(Clone)]
 pub struct Attachment {
     pub name: String,
     pub data: Vec<u8>,
@@ -40,40 +40,89 @@ impl Debug for Attachment {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Attachment")
             .field("name", &self.name)
-            .field("data", &self.data.len())
+            .field("data of size", &self.data.len())
             .finish()
     }
 }
 
+/// A high-level API for interacting with .msg files, providing an owned data structure.
+#[derive(Debug, Clone)]
 pub struct Email {
-    from: (String, String),
-    to: Vec<(String, String)>,
-    cc: Vec<(String, String)>,
-    bcc: Vec<(String, String)>,
-    subject: String,
-    body: Option<String>,
-    attachments: Vec<Attachment>,
-    embedded_messages: Vec<Email>,
+    pub from: Option<(String, String)>,
+    pub sent_date: Option<chrono::DateTime<Utc>>,
+    pub to: Vec<(String, String)>,
+    pub cc: Vec<(String, String)>,
+    pub bcc: Vec<(String, String)>,
+    pub subject: Option<String>,
+    pub body: Option<String>,
+    pub attachments: Vec<Attachment>,
+    pub embedded_messages: Vec<Email>,
 }
 
-fn rec_build(file: &Path, subpath: &Path) -> Email {
-    let mut comp = cfb::open(file).unwrap();
-    let mut reader = MsgReader::new(&mut comp, subpath);
-    let subject = reader.subject().unwrap();
-    let emb_paths = reader.embedded_messages().unwrap();
-    let embedded_messages: Vec<_> = emb_paths
-        .into_iter()
-        .map(|emb_path| rec_build(file, &emb_path))
-        .collect();
-    Email {
-        from: ("".to_string(), "".to_string()),
-        to: vec![],
-        cc: vec![],
-        bcc: vec![],
-        subject,
-        body: None,
-        attachments: vec![],
-        embedded_messages,
+impl Email {
+    pub fn from_path<P: AsRef<Path>>(file: P) -> Self {
+        Self::from_path_internal(file.as_ref(), Path::new("/"))
+    }
+    pub fn from_bytes<B: AsRef<[u8]>>(bytes: B) -> Self {
+        Self::from_bytes_internal(bytes.as_ref(), Path::new("/"))
+    }
+
+    fn from_path_internal(file: &Path, subpath: &Path) -> Self {
+        let mut comp = cfb::open(file).unwrap();
+        let mut reader = MsgReader::new(&mut comp, subpath);
+        let from = reader.from().ok();
+        let sent_date = reader.sent_date().ok();
+        let to = reader.to().unwrap_or_default();
+        let cc = reader.cc().unwrap_or_default();
+        let bcc = reader.bcc().unwrap_or_default();
+        let subject = reader.pr_subject().ok();
+        let body = reader.body().ok();
+        let attachments = reader.attachments().unwrap_or_default();
+        let emb_paths = reader.embedded_messages().unwrap();
+        let embedded_messages: Vec<_> = emb_paths
+            .into_iter()
+            .map(|emb_path| Self::from_path_internal(file, &emb_path))
+            .collect();
+        Self {
+            from,
+            sent_date,
+            to,
+            cc,
+            bcc,
+            subject,
+            body,
+            attachments,
+            embedded_messages,
+        }
+    }
+    fn from_bytes_internal(bytes: &[u8], subpath: &Path) -> Self {
+        let cur = Cursor::new(bytes);
+        let mut comp = CompoundFile::open(cur).unwrap();
+        let mut reader = MsgReader::new(&mut comp, subpath);
+        let from = reader.from().ok();
+        let sent_date = reader.sent_date().ok();
+        let to = reader.to().unwrap_or_default();
+        let cc = reader.cc().unwrap_or_default();
+        let bcc = reader.bcc().unwrap_or_default();
+        let subject = reader.pr_subject().ok();
+        let body = reader.body().ok();
+        let attachments = reader.attachments().unwrap_or_default();
+        let emb_paths = reader.embedded_messages().unwrap();
+        let embedded_messages: Vec<_> = emb_paths
+            .into_iter()
+            .map(|emb_path| Self::from_bytes_internal(bytes, &emb_path))
+            .collect();
+        Self {
+            from,
+            sent_date,
+            to,
+            cc,
+            bcc,
+            subject,
+            body,
+            attachments,
+            embedded_messages,
+        }
     }
 }
 
@@ -103,13 +152,13 @@ where
         content.read_to_end(&mut buf).unwrap();
         Ok(buf)
     }
-    fn read_path_binary(&mut self, subpath: &Path) -> Result<Vec<u8>> {
+    pub fn read_path_as_binary(&mut self, subpath: &Path) -> Result<Vec<u8>> {
         let mut content = self.inner.open_stream(self.path.join(subpath))?;
         let mut buf = vec![];
         content.read_to_end(&mut buf).unwrap();
         Ok(buf)
     }
-    fn read_path_string(&mut self, subpath: &Path) -> Result<String> {
+    pub fn read_path_as_string(&mut self, subpath: &Path) -> Result<String> {
         let mut content = self.inner.open_stream(self.path.join(subpath))?;
         let mut buf = vec![];
         content.read_to_end(&mut buf).unwrap();
@@ -117,22 +166,22 @@ where
             .map_err(|_e| MsgError::Encoding)
             .map(|x| x.trim_end_matches('\0').to_string())
     }
-    pub fn subject(&mut self) -> Result<String> {
+    pub fn pr_subject(&mut self) -> Result<String> {
         self.read_simple_string("0037") // PR_SUBJECT
     }
-    fn pr_sender_name(&mut self) -> Result<String> {
+    pub fn pr_sender_name(&mut self) -> Result<String> {
         self.read_simple_string("0C1A")
     }
-    fn pr_sender_email_adress_str(&mut self) -> Result<String> {
+    pub fn pr_sender_email_adress_str(&mut self) -> Result<String> {
         self.read_simple_string("0C19")
     }
-    fn pr_smtp_sender_address(&mut self) -> Result<String> {
+    pub fn pr_smtp_sender_address(&mut self) -> Result<String> {
         self.read_simple_string("5D01")
     }
-    fn pr_smtp_address(&mut self) -> Result<String> {
+    pub fn pr_smtp_address(&mut self) -> Result<String> {
         self.read_simple_string("39FE")
     }
-    fn sender_address(&mut self) -> Result<String> {
+    pub fn sender_address(&mut self) -> Result<String> {
         self.pr_sender_email_adress_str()
             .or_else(|_| self.pr_smtp_address())
             .or_else(|_| self.pr_smtp_sender_address())
@@ -143,11 +192,11 @@ where
     pub fn pr_transport_message_headers(&mut self) -> Result<String> {
         self.read_simple_string("007D")
     }
-    fn pr_body_html(&mut self) -> Result<String> {
+    pub fn pr_body_html(&mut self) -> Result<String> {
         let bin = self.read_simple_binary("1013")?;
         String::from_utf8(bin).map_err(|_| MsgError::Encoding)
     }
-    fn pr_rtf_compressed(&mut self) -> Result<Vec<u8>> {
+    pub fn pr_rtf_compressed(&mut self) -> Result<Vec<u8>> {
         self.read_simple_binary("1009")
     }
     fn rtf(&mut self) -> Result<String> {
@@ -157,7 +206,7 @@ where
     pub fn body(&mut self) -> Result<String> {
         self.pr_body_html().or_else(|_| self.rtf())
     }
-    pub fn sent_date(&mut self) -> Result<DateTime<FixedOffset>> {
+    pub fn sent_date(&mut self) -> Result<DateTime<Utc>> {
         let headers = self.pr_transport_message_headers()?;
         let dateline = headers
             .lines()
@@ -166,9 +215,11 @@ where
             .split_once(": ")
             .ok_or(MsgError::Encoding)?
             .1;
-        chrono::DateTime::parse_from_rfc2822(dateline).map_err(|_| MsgError::Encoding)
+        chrono::DateTime::parse_from_rfc2822(dateline)
+            .map_err(|_| MsgError::Encoding)
+            .map(|d| d.with_timezone(&Utc))
     }
-    fn recipients(&mut self) -> Result<HashMap<String, String>> {
+    fn recipients(&mut self) -> Result<Vec<(String, String)>> {
         let recip_paths: Vec<_> = self
             .inner
             .read_storage(self.path)?
@@ -178,36 +229,36 @@ where
         recip_paths
             .iter()
             .map(|r| {
-                let name = self.read_path_string(&r.join("__substg1.0_3001001F"))?;
-                let address = self.read_path_string(&r.join("__substg1.0_39FE001F"))?;
+                let name = self.read_path_as_string(&r.join("__substg1.0_3001001F"))?;
+                let address = self.read_path_as_string(&r.join("__substg1.0_39FE001F"))?;
                 Ok((name, address))
             })
             .collect()
     }
-    pub fn to(&mut self) -> Result<HashMap<String, String>> {
+    pub fn to(&mut self) -> Result<Vec<(String, String)>> {
         let to_field = self.read_simple_string("0E04")?;
         let to_list: Vec<_> = to_field.split(";").map(|n| n.trim()).collect();
-        let output: HashMap<String, String> = self
+        let output: Vec<(String, String)> = self
             .recipients()?
             .into_iter()
             .filter(|(k, _v)| to_list.contains(&&k[..]))
             .collect();
         Ok(output)
     }
-    pub fn cc(&mut self) -> Result<HashMap<String, String>> {
+    pub fn cc(&mut self) -> Result<Vec<(String, String)>> {
         let cc_field = self.read_simple_string("0E03")?;
         let cc_list: Vec<_> = cc_field.split(";").map(|n| n.trim()).collect();
-        let output: HashMap<String, String> = self
+        let output: Vec<(String, String)> = self
             .recipients()?
             .into_iter()
             .filter(|(k, _v)| cc_list.contains(&&k[..]))
             .collect();
         Ok(output)
     }
-    pub fn bcc(&mut self) -> Result<HashMap<String, String>> {
+    pub fn bcc(&mut self) -> Result<Vec<(String, String)>> {
         let bcc_field = self.read_simple_string("0E02")?;
         let bcc_list: Vec<_> = bcc_field.split(";").map(|n| n.trim()).collect();
-        let output: HashMap<String, String> = self
+        let output: Vec<(String, String)> = self
             .recipients()?
             .into_iter()
             .filter(|(k, _v)| bcc_list.contains(&&k[..]))
@@ -225,9 +276,9 @@ where
             .iter()
             .flat_map(|a| {
                 let name = self
-                    .read_path_string(&a.join("__substg1.0_3704001F"))
-                    .or_else(|_| self.read_path_string(&a.join("__substg1.0_3001001F")))?;
-                let data = self.read_path_binary(&a.join("__substg1.0_37010102"))?;
+                    .read_path_as_string(&a.join("__substg1.0_3704001F"))
+                    .or_else(|_| self.read_path_as_string(&a.join("__substg1.0_3001001F")))?;
+                let data = self.read_path_as_binary(&a.join("__substg1.0_37010102"))?;
                 let output: Result<Attachment> = Ok(Attachment { name, data });
                 output
             })
